@@ -200,7 +200,10 @@ mod tests {
     #[test]
     #[ignore = "Computationally expensive since it loads the entire dictionary"]
     fn test_from_dictionary() {
-        let dictionary: Dictionary = Dictionary::from_file("dictionary.txt", 255).unwrap();
+        let dictionary: Dictionary = match Dictionary::from_file("dictionary.txt", 255) {
+            Some(d) => d,
+            None => panic!("Failed to load dictionary")
+        };
         let mut tree: BKTree = BKTree::new(dictionary.max_word_length as u16, dictionary.alphabet_length as u16, dictionary.words.len());
 
         assert_eq!(tree.alphabet_length as usize, dictionary.alphabet_length);
@@ -225,7 +228,10 @@ mod tests {
         tree.add("hell".to_string());
         tree.add("help".to_string());
 
-        let similar_words: Vec<String> = tree.get_similar_words("hell".to_string(), 1).unwrap();
+        let similar_words: Vec<String> = match tree.get_similar_words("hell".to_string(), 1) {
+            Some(words) => words,
+            None => panic!("Failed to get similar words")
+        };
         assert_eq!(similar_words.len(), 4);
         assert!(similar_words.contains(&"hello".to_string()));
         assert!(similar_words.contains(&"hella".to_string()));
@@ -243,29 +249,50 @@ mod tests {
         tree.add("hell".to_string());
         tree.add("help".to_string());
 
-        tree.save_to_file("bk_tree.bin").unwrap();
+        match tree.save_to_file("bk_tree.bin") {
+            Ok(_) => (),
+            Err(e) => panic!("Failed to save BKTree to file: {}", e)
+        };
 
-        let new_tree: BKTree = BKTree::from_file("bk_tree.bin").unwrap();
+        let new_tree: BKTree = match BKTree::from_file("bk_tree.bin") {
+            Ok(t) => t,
+            Err(e) => panic!("Failed to load BKTree from file: {}", e)
+        };
         
         assert_eq!(tree, new_tree);
-        std::fs::remove_file("bk_tree.bin").unwrap();
+        match std::fs::remove_file("bk_tree.bin") {
+            Ok(_) => (),
+            Err(e) => panic!("Failed to remove BKTree file: {}", e)
+        }
     }
 
     #[test]
     #[ignore = "Computationally expensive since it loads the entire dictionary"]
     fn test_full_file_serialization() {
-        let dictionary: Dictionary = Dictionary::from_file("dictionary.txt", 255).unwrap();
+        let dictionary: Dictionary = match Dictionary::from_file("dictionary.txt", 255) {
+            Some(d) => d,
+            None => panic!("Failed to load dictionary")
+        };
         let mut tree: BKTree = BKTree::new(dictionary.max_word_length as u16, dictionary.alphabet_length as u16, dictionary.words.len());
 
         for word in dictionary.words.iter() {
             tree.add(word.clone());
         }
 
-        tree.save_to_file("bk_tree_full.bin").unwrap();
+        match tree.save_to_file("bk_tree_full.bin") {
+            Ok(_) => (),
+            Err(e) => panic!("Failed to save BKTree to file: {}", e)
+        };
 
-        let new_tree: BKTree = BKTree::from_file("bk_tree_full.bin").unwrap();
+        let new_tree: BKTree = match BKTree::from_file("bk_tree_full.bin") {
+            Ok(t) => t,
+            Err(e) => panic!("Failed to load BKTree from file: {}", e)
+        };
  
         assert_eq!(tree, new_tree);
-        std::fs::remove_file("bk_tree_full.bin").unwrap();
+        match std::fs::remove_file("bk_tree_full.bin") {
+            Ok(_) => (),
+            Err(e) => panic!("Failed to remove BKTree file: {}", e)
+        };
     }
 }

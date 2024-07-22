@@ -51,7 +51,10 @@ mod tests {
 
     #[test]
     fn test_from_file() {
-        let dictionary: Dictionary = Dictionary::from_file("dictionary.txt", 255).unwrap();
+        let dictionary: Dictionary = match Dictionary::from_file("dictionary.txt", 255) {
+            Some(dictionary) => dictionary,
+            None => panic!("Failed to load dictionary from file")
+        };
         assert_ne!(dictionary.words.len(), 0);
         assert_eq!(dictionary.alphabet_length, 255);
 
