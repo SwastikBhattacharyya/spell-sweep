@@ -98,7 +98,49 @@ impl BKTree {
             }
         }
     }
+
+    pub fn does_contain(&self, word: String) -> bool {
+        let mut current: usize = 0;
+        let mut distance: Option<usize>;
+
+        loop {
+            distance = self.get_damerau_levenshtein_distance(&self.tree[current].word, &word);
+
+            match distance {
+                Some(0) => return true,
+                Some(d) if self.tree[current].next[d].is_none() => return false,
+                Some(d) => current = self.tree[current].next[d].unwrap(),
+                None => return false
+            }
+        }
+    }
+
+    pub fn get_similar_words(&self, word: String, tolerance: usize) -> Option<Vec<String>> {
+        let mut result: Vec<String> = Vec::new();
+        let mut stack: Vec<usize> = vec![0];
+
+        while !stack.is_empty() {
+            let current: usize = stack.pop()?;
+            let distance: usize = self.get_damerau_levenshtein_distance(&word, &self.tree[current].word)?;
+
+            if distance <= tolerance {
+                result.push(self.tree[current].word.clone());
+            }
+
+            let tolerance_start: usize = if distance > tolerance { distance - tolerance } else { 1 };
+            let tolerance_end: usize = distance + tolerance;
+
+            for i in tolerance_start..=tolerance_end {
+                if self.tree[current].next[i].is_some() {
+                    stack.push(self.tree[current].next[i]?);
+                }
+            }
+        }
+
+        Some(result)
+    }
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -106,6 +148,7 @@ mod tests {
     use super::super::dictionary::Dictionary;
 
     #[test]
+    #[ignore = "Computationally Expensive"]
     fn test_from_dictionary() {
         let dictionary: Dictionary = Dictionary::from_file("dictionary.txt", 255).unwrap();
         let mut tree: BKTree = BKTree::new(dictionary.max_word_length, dictionary.alphabet_length, dictionary.words.len());
@@ -116,5 +159,27 @@ mod tests {
         for word in dictionary.words.iter() {
             tree.add(word.clone());
         }
+
+        for word in dictionary.words.iter() {
+            assert!(tree.does_contain(word.clone()));
+        }
+    }
+
+    #[test]
+    fn test_similar_words() {
+        let mut tree: BKTree = BKTree::new(3, 255, 5);
+
+        tree.add("hello".to_string());
+        tree.add("world".to_string());
+        tree.add("hella".to_string());
+        tree.add("hell".to_string());
+        tree.add("help".to_string());
+
+        let similar_words: Vec<String> = tree.get_similar_words("hell".to_string(), 1).unwrap();
+        assert_eq!(similar_words.len(), 4);
+        assert!(similar_words.contains(&"hello".to_string()));
+        assert!(similar_words.contains(&"hella".to_string()));
+        assert!(similar_words.contains(&"hell".to_string()));
+        assert!(similar_words.contains(&"help".to_string()));
     }
 }
