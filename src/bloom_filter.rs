@@ -13,6 +13,7 @@ use crate::utils;
 #[derive(Debug, Serialize, Deserialize, Archive, PartialEq)]
 #[archive(compare(PartialEq), check_bytes)]
 #[archive_attr(derive(Debug))]
+#[readonly::make]
 pub struct BloomFilter {
     pub fp_prob: f32,
     pub size: u64,
