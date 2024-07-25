@@ -1,8 +1,8 @@
-fn get_words(string: &String) -> Vec<String> {
+pub fn get_words(string: &String) -> Vec<String> {
     string.split_whitespace().map(|s| s.to_string()).collect()
 }
 
-fn split_word(word: &mut String) -> (String, String, String) {
+pub fn split_word(word: &mut String) -> (String, String, String) {
     let mut starting_punctuations: String = String::new();
     let mut middle_word: String = String::new();
     let mut ending_punctuations: String = String::new();

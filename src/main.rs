@@ -12,5 +12,5 @@ fn main() {
     let _ = spell_check.populate_bk_tree();
     let _ = spell_check.populate_bloom_filter();
 
-    println!("{}", spell_check.bloom_filter.as_ref().unwrap().lookup("neqs"));
+    spell_check.run();
 }
