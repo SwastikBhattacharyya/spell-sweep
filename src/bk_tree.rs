@@ -173,7 +173,7 @@ impl BKTree {
         Some(result)
     }
 
-    pub fn save_to_file(&self, file_path: &str) -> std::io::Result<()> {
+    pub fn to_file(&self, file_path: &str) -> std::io::Result<()> {
         let bytes: AlignedVec = match rkyv::to_bytes::<_, 256>(self) {
             Ok(b) => b,
             Err(_) => return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Failed to serialize BKTree"))
@@ -249,7 +249,7 @@ mod tests {
         tree.add("hell".to_string());
         tree.add("help".to_string());
 
-        match tree.save_to_file("bk_tree.bin") {
+        match tree.to_file("bk_tree.bin") {
             Ok(_) => (),
             Err(e) => panic!("Failed to save BKTree to file: {}", e)
         };
@@ -279,7 +279,7 @@ mod tests {
             tree.add(word.clone());
         }
 
-        match tree.save_to_file("bk_tree_full.bin") {
+        match tree.to_file("bk_tree_full.bin") {
             Ok(_) => (),
             Err(e) => panic!("Failed to save BKTree to file: {}", e)
         };
