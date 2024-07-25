@@ -99,13 +99,23 @@ impl BloomFilter {
     }
 }
 
+impl From<Vec<String>> for BloomFilter {
+    fn from(value: Vec<String>) -> Self {
+        let mut bf = Self::new(value.len() as u32, 0.01);
+        for word in value {
+            bf.insert(word.as_str());
+        }
+        bf
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_fp_prob() {
-        let fp_prob = 0.05;
+        let fp_prob = 0.01;
         let mut bf = BloomFilter::new(20, fp_prob);
         let word_present = [
             "A", "quick", "brown", "Fox", "jUmps", "over", "A", "lazy", "DOG",
@@ -145,7 +155,7 @@ mod tests {
 
     #[test]
     fn test_ser_deser() {
-        let mut bf = BloomFilter::new(20, 0.05);
+        let mut bf = BloomFilter::new(20, 0.01);
         let word_present = vec![
             "A", "quick", "brown", "Fox", "jUmps", "over", "A", "lazy", "DOG",
         ];
@@ -157,5 +167,40 @@ mod tests {
         bf.to_file("bf.bin").unwrap();
         let new_bf = BloomFilter::from_file("bf.bin").unwrap();
         assert_eq!(bf, new_bf);
+    }
+
+    #[test]
+    fn test_from() {
+        let word_present = vec![
+            "A", "quick", "brown", "Fox", "jUmps", "over", "A", "lazy", "DOG",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect::<Vec<String>>();
+
+        let word_absent = ["hello", "good", "what", "noooo", "truly", "never"];
+
+        let bf = BloomFilter::from(word_present.clone());
+
+        let test = [
+            "good", "Fox", "over", "truly", "brown", "never", "what", "quick",
+        ];
+
+        let (mut true_pos, mut true_neg, mut false_pos) = (0, 0, 0);
+
+        for w in test.into_iter() {
+            if bf.lookup(w) {
+                if word_present.contains(&w.to_string()) {
+                    true_pos += 1;
+                } else if word_absent.contains(&w) {
+                    false_pos += 1;
+                }
+            } else {
+                true_neg += 1;
+            }
+        }
+
+        assert_eq!(true_pos + true_neg + false_pos, test.len());
+        assert!((false_pos as f32 / true_neg as f32) <= 0.01);
     }
 }

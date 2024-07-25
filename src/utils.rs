@@ -1,3 +1,4 @@
+use std::error::Error;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use rkyv::{
