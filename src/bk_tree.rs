@@ -14,7 +14,7 @@ impl Node {
     pub fn new(word: String, max_word_length: usize) -> Self {
         Self {
             word,
-            next: vec![None; max_word_length * 2]
+            next: vec![None; max_word_length + 1]
         }
     }
 }
@@ -194,20 +194,23 @@ impl BKTree {
 
 #[cfg(test)]
 mod tests {
+    use std::fs::File;
     use super::BKTree;
     use super::super::dictionary::Dictionary;
 
     #[test]
     #[ignore = "Computationally expensive since it loads the entire dictionary"]
     fn test_from_dictionary() {
-        let dictionary: Dictionary = match Dictionary::from_file("dictionary.txt", 255) {
-            Some(d) => d,
-            None => panic!("Failed to load dictionary")
+        let file: File = match File::open("dictionary.txt") {
+            Ok(file) => file,
+            Err(_) => panic!("Failed to open file")
         };
+
+        let dictionary: Dictionary = Dictionary::from((file, 255));
         let mut tree: BKTree = BKTree::new(dictionary.max_word_length as u16, dictionary.alphabet_length as u16, dictionary.words.len());
 
-        assert_eq!(tree.alphabet_length as usize, dictionary.alphabet_length);
-        assert_eq!(tree.max_word_length as usize, dictionary.max_word_length);
+        assert_eq!(tree.alphabet_length, dictionary.alphabet_length);
+        assert_eq!(tree.max_word_length, dictionary.max_word_length);
 
         for word in dictionary.words.iter() {
             tree.add(word.clone());
@@ -220,7 +223,7 @@ mod tests {
 
     #[test]
     fn test_similar_words() {
-        let mut tree: BKTree = BKTree::new(3, 255, 5);
+        let mut tree: BKTree = BKTree::new(5, 255, 5);
 
         tree.add("hello".to_string());
         tree.add("world".to_string());
@@ -241,7 +244,7 @@ mod tests {
 
     #[test]
     fn test_file_serialization() {
-        let mut tree: BKTree = BKTree::new(3, 255, 5);
+        let mut tree: BKTree = BKTree::new(5, 255, 5);
 
         tree.add("hello".to_string());
         tree.add("world".to_string());
@@ -269,10 +272,12 @@ mod tests {
     #[test]
     #[ignore = "Computationally expensive since it loads the entire dictionary"]
     fn test_full_file_serialization() {
-        let dictionary: Dictionary = match Dictionary::from_file("dictionary.txt", 255) {
-            Some(d) => d,
-            None => panic!("Failed to load dictionary")
+        let file: File = match File::open("dictionary.txt") {
+            Ok(file) => file,
+            Err(_) => panic!("Failed to open file")
         };
+
+        let dictionary: Dictionary = Dictionary::from((file, 255));
         let mut tree: BKTree = BKTree::new(dictionary.max_word_length as u16, dictionary.alphabet_length as u16, dictionary.words.len());
 
         for word in dictionary.words.iter() {

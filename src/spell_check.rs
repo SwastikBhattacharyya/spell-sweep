@@ -1,5 +1,4 @@
-use std::path::Path;
-
+use std::{fs::File, path::Path};
 use crate::{bk_tree::BKTree, bloom_filter::BloomFilter, dictionary::Dictionary, processor};
 
 #[readonly::make]
@@ -80,9 +79,13 @@ impl SpellCheck {
     }
 
     fn get_dictionary(&mut self) {
-        self.dictionary = match Dictionary::from_file("dictionary.txt", 255) {
-            Some(dictionary) => Some(dictionary),
-            None => panic!("Failed to load dictionary from file")
+        let file: File = match File::open("dictionary.txt") {
+            Ok(file) => file,
+            Err(_) => panic!("Failed to open file")
+        };
+
+        self.dictionary = match Dictionary::from((file, 255)) {
+            dictionary => Some(dictionary),
         };
     }
 

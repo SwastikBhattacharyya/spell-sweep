@@ -167,6 +167,7 @@ mod tests {
         bf.to_file("bf.bin").unwrap();
         let new_bf = BloomFilter::from_file("bf.bin").unwrap();
         assert_eq!(bf, new_bf);
+        std::fs::remove_file("bf.bin").expect("Failed to remove file");
     }
 
     #[test]
