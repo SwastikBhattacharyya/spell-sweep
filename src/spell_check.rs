@@ -15,10 +15,8 @@ impl SpellCheck {
 
     pub fn populate_bk_tree(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if Path::new("bk_tree.bin").exists() {
-            self.bk_tree = match BKTree::from_file("bk_tree.bin") {
-                Ok(t) => Some(t),
-                Err(_) => None
-            };
+            let file: File = File::open("bk_tree.bin").expect("Failed to open file");
+            self.bk_tree = Some(BKTree::from(file));
         }
         else {
             if self.dictionary.is_none() {
@@ -38,10 +36,8 @@ impl SpellCheck {
         }
         match &self.bk_tree {
             Some(tree) => {
-                match tree.to_file("bk_tree.bin") {
-                    Ok(_) => Ok(()),
-                    Err(_) => Err(Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, "Failed to write BKTree to file")))
-                }
+                tree.to_file("bk_tree.bin");
+                Ok(())
             },
             None => Err(Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, "BKTree not initialized")))
         }
