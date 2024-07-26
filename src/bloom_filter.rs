@@ -8,7 +8,7 @@ use std::{
 
 use rkyv::{AlignedVec, Archive, Deserialize, Serialize};
 
-use crate::utils;
+use crate::{dictionary::Dictionary, utils};
 
 #[derive(Debug, Serialize, Deserialize, Archive, PartialEq)]
 #[archive(compare(PartialEq), check_bytes)]
@@ -109,8 +109,20 @@ impl From<Vec<String>> for BloomFilter {
     }
 }
 
+impl From<&Dictionary> for BloomFilter {
+    fn from(value: &Dictionary) -> Self {
+        let mut bf = Self::new(value.words.len() as u32, 0.01);
+        for word in value.words.iter() {
+            bf.insert(word.as_str())
+        }
+        bf
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use fs::File;
+
     use super::*;
 
     #[test]
@@ -171,7 +183,7 @@ mod tests {
     }
 
     #[test]
-    fn test_from() {
+    fn test_from_vector() {
         let word_present = vec![
             "A", "quick", "brown", "Fox", "jUmps", "over", "A", "lazy", "DOG",
         ]
@@ -203,5 +215,19 @@ mod tests {
 
         assert_eq!(true_pos + true_neg + false_pos, test.len());
         assert!((false_pos as f32 / true_neg as f32) <= 0.01);
+    }
+
+    #[test]
+    fn test_from_dictionary() {
+        let file: File = File::open("dictionary.txt").expect("File not found");
+        let dictionary: Dictionary = Dictionary::from((file, 255));
+        
+        let words_absent = ["clesr", "erroe", "hel;", "rivee", "jokeq", "fathep"];
+
+        let bf = BloomFilter::from(&dictionary);
+
+        for word in words_absent {
+            assert_eq!(bf.lookup(word), false);
+        }
     }
 }
