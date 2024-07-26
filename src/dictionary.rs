@@ -1,9 +1,9 @@
-use std::{fs::File, io::{BufRead, BufReader}};
+use std::{fs::File, io::{BufRead, BufReader}, rc::Rc};
 
 #[derive(Debug)]
 #[readonly::make]
 pub struct Dictionary {
-    pub words: Vec<String>,
+    pub words: Vec<Rc<String>>,
     pub max_word_length: u16,
     pub alphabet_length: u16,
 }
@@ -12,13 +12,13 @@ impl From<(File, u16)> for Dictionary {
     fn from(value: (File, u16)) -> Self {
         let buf_reader: BufReader<File> = BufReader::new(value.0);
 
-        let mut words: Vec<String> = Vec::new();
+        let mut words: Vec<Rc<String>> = Vec::new();
         let mut max_word_length: u16 = 0;
 
         for line in buf_reader.lines().filter_map(Result::ok) {
-            let word: String = line;
+            let word: Rc<String> = Rc::new(line.to_lowercase());
             max_word_length = std::cmp::max(word.len() as u16, max_word_length);
-            words.push(word.to_lowercase());
+            words.push(word);
         }
 
         Self {
