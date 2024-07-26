@@ -1,4 +1,4 @@
-use std::{fs::File, io::{BufReader, BufWriter, Read, Write}, rc::Rc};
+use std::{error::Error, fs::File, io::{BufReader, BufWriter, Read, Write}, rc::Rc};
 use rkyv::{AlignedVec, Archive, Deserialize, Serialize};
 
 use crate::dictionary::Dictionary;
@@ -44,7 +44,7 @@ impl BKTree {
         }
     }
 
-    fn get_damerau_levenshtein_distance(&self, a: &str, b: &str) -> u8 {
+    fn get_damerau_levenshtein_distance(&self, a: &str, b: &str) -> Result<u8, Box<dyn Error>> {
         let m: usize = a.len();
         let n: usize = b.len();
 
@@ -67,11 +67,11 @@ impl BKTree {
         for i in 1..=m {
             let mut db: usize = 0;
             for j in 1..=n {
-                let k: usize = da[b.chars().nth(j - 1).expect("Couldn't get the (j - 1)th character of b") as usize];
+                let k: usize = da[b.chars().nth(j - 1).ok_or("Couldn't get the (j - 1)th character of b")? as usize];
                 let l: usize = db;
 
-                let a_char: char = a.chars().nth(i - 1).expect("Couldn't get the (i - 1)th character of a");
-                let b_char: char = b.chars().nth(j - 1).expect("Couldn't get the (j - 1)th character of b");
+                let a_char: char = a.chars().nth(i - 1).ok_or("Couldn't get the (i - 1)th character of a")?;
+                let b_char: char = b.chars().nth(j - 1).ok_or("Couldn't get the (j - 1)th character of b")?;
                 let cost: usize = if a_char == b_char { 0 } else { 1 };
                 db = if cost == 0 { j } else { db };
 
@@ -86,13 +86,13 @@ impl BKTree {
                     )
                 );
             }
-            da[a.chars().nth(i - 1).expect("Couldn't get the (i - 1)th character of a") as usize] = i;
+            da[a.chars().nth(i - 1).ok_or("Couldn't get the (i - 1)th character of a")? as usize] = i;
         }
 
-        dp[m + 1][n + 1] as u8
+        Ok(dp[m + 1][n + 1] as u8)
     }
 
-    pub fn add(&mut self, word: Rc<String>) {
+    pub fn add(&mut self, word: Rc<String>) -> Result<(), Box<dyn Error>> {
         let mut current: usize = 0;
         let mut distance: u8;
 
@@ -101,27 +101,28 @@ impl BKTree {
                 Some(w) => w,
                 None => ""
             };
-            distance = self.get_damerau_levenshtein_distance(&current_word, &word);
+            distance = self.get_damerau_levenshtein_distance(&current_word, &word)?;
 
             match distance {
-                0 => return,
-                d if self.tree[current].next[d as usize].is_none() => {
-                    if !self.tree[current].word.is_none() { self.tree[current].next[d as usize] = Some(self.size); }
-                    self.tree[self.size as usize].word = Some(word);
-                    self.size += 1;
-                    return;
-                },
+                0 => break,
                 d => {
                     match self.tree[current].next[d as usize] {
                         Some(n) => current = n as usize,
-                        None => return
+                        None => {
+                            if !self.tree[current].word.is_none() { self.tree[current].next[d as usize] = Some(self.size); }
+                            self.tree[self.size as usize].word = Some(word);
+                            self.size += 1;
+                            break;
+                        },
                     }
-                }
+                } 
             }
         }
+
+        Ok(())
     }
 
-    pub fn does_contain(&self, word: &str) -> bool {
+    pub fn does_contain(&self, word: &str) -> Result<bool, Box<dyn Error>> {
         let mut current: usize = 0;
         let mut distance: u8;
 
@@ -130,32 +131,33 @@ impl BKTree {
                 Some(w) => w,
                 None => ""
             };
-            distance = self.get_damerau_levenshtein_distance(&current_word, &word);
+            distance = self.get_damerau_levenshtein_distance(&current_word, &word)?;
 
             match distance {
-                0 => return true,
-                d if self.tree[current].next[d as usize].is_none() => return false,
+                0 => return Ok(true),
+                d if self.tree[current].next[d as usize].is_none() => return Ok(false),
                 d => {
                     match self.tree[current].next[d as usize] {
                         Some(n) => current = n as usize,
-                        None => return false
+                        None => return Ok(false)
                     }
                 },
             }
         }
     }
 
-    pub fn get_similar_words(&self, word: &str, tolerance: u8) -> Vec<&str> {
+    pub fn get_similar_words(&self, word: &str, tolerance: u8) -> Result<Vec<&str>, Box<dyn Error>> {
         let mut result: Vec<&str> = Vec::new();
         let mut stack: Vec<usize> = vec![0];
 
         while !stack.is_empty() {
-            let current: usize = stack.pop().expect("Failed to pop from stack");
+            let current: usize = stack.pop()
+                .ok_or("Couldn't get current element from stack")?;
             let current_word: &str = match &self.tree[current].word {
                 Some(w) => w,
                 None => ""
             };
-            let distance: u8 = self.get_damerau_levenshtein_distance(&word, &current_word);
+            let distance: u8 = self.get_damerau_levenshtein_distance(&word, &current_word)?;
 
             if distance <= tolerance {
                 result.push(current_word);
@@ -166,30 +168,33 @@ impl BKTree {
 
             for i in tolerance_start..=tolerance_end {
                 if self.tree[current].next[i as usize].is_some() {
-                    stack.push(self.tree[current].next[i as usize].expect("Couldn't get next element from node in BKTree") as usize);
+                    stack.push(self.tree[current].next[i as usize]
+                            .ok_or("Couldn't push element to stack")? as usize);
                 }
             }
         }
 
-        result
+        Ok(result)
     }
 
-    pub fn to_file(&self, file_path: &str) {
-        let bytes: AlignedVec = rkyv::to_bytes::<_, 256>(self).expect("Failed to serialize BKTree");
-        let file: File = std::fs::File::create(file_path).expect("Failed to create BKTree file"); 
+    pub fn to_file(&self, file_path: &str) -> Result<(), Box<dyn Error>> {
+        let bytes: AlignedVec = rkyv::to_bytes::<_, 256>(self)?;
+        let file: File = std::fs::File::create(file_path)?; 
         let mut writer: BufWriter<File> = BufWriter::new(file);
-        writer.write_all(&bytes).expect("Failed to write BKTree to file")
+        writer.write_all(&bytes)?;
+
+        Ok(())
     }
 }
 
 impl From<&Dictionary> for BKTree {
     fn from(value: &Dictionary) -> Self {
         let mut tree: BKTree = BKTree::new(value.max_word_length, value.alphabet_length, value.words.len());
-
+    
         for word in value.words.iter() {
-            tree.add(Rc::clone(&word));
+            tree.add(Rc::clone(&word)).expect("Failed to add word to tree");
         }
-
+        
         tree
     }
 }
@@ -199,7 +204,7 @@ impl From<File> for BKTree {
         let mut reader: BufReader<&mut File> = BufReader::new(&mut value);        
         
         let mut bytes: Vec<u8> = Vec::new();
-        reader.read_to_end(&mut bytes).expect("Failed to read BKTree file");
+        reader.read_to_end(&mut bytes).expect("Failed to read to bytes");
 
         let tree: BKTree = rkyv::from_bytes::<BKTree>(&bytes).expect("Failed to deserialize BKTree");
         tree
@@ -208,6 +213,7 @@ impl From<File> for BKTree {
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error;
     use std::fs::File;
     use std::rc::Rc;
     use super::BKTree;
@@ -219,69 +225,73 @@ mod tests {
         let file: File = File::open("dictionary.txt").expect("Failed to open file"); 
 
         let dictionary: Dictionary = Dictionary::from((file, 255));
-        let tree: BKTree = BKTree::from(&dictionary);
+        let tree = BKTree::from(&dictionary);
 
         assert_eq!(tree.alphabet_length, dictionary.alphabet_length);
         assert_eq!(tree.max_word_length, dictionary.max_word_length);
         assert_eq!(tree.size, dictionary.words.len() as u32);
 
         for word in dictionary.words.iter() {
-            assert!(tree.does_contain(&word));
+            assert!(tree.does_contain(&word).unwrap());
             assert_eq!(Rc::strong_count(&word), 2);
         }
     }
 
     #[test]
-    fn test_similar_words() {
+    fn test_similar_words() -> Result<(), Box<dyn Error>> {
         let mut tree: BKTree = BKTree::new(5, 255, 5);
 
-        tree.add(Rc::new("hello".to_string()));
-        tree.add(Rc::new("world".to_string()));
-        tree.add(Rc::new("hella".to_string()));
-        tree.add(Rc::new("hell".to_string()));
-        tree.add(Rc::new("help".to_string()));
+        tree.add(Rc::new("hello".to_string()))?;
+        tree.add(Rc::new("world".to_string()))?;
+        tree.add(Rc::new("hella".to_string()))?;
+        tree.add(Rc::new("hell".to_string()))?;
+        tree.add(Rc::new("help".to_string()))?;
 
-        let similar_words: Vec<&str> = tree.get_similar_words("hell", 1);
+        let similar_words: Vec<&str> = tree.get_similar_words("hell", 1).expect("Failed to get similar words");
         assert_eq!(similar_words.len(), 4);
         assert!(similar_words.contains(&"hello"));
         assert!(similar_words.contains(&"hella"));
         assert!(similar_words.contains(&"hell"));
         assert!(similar_words.contains(&"help"));
+
+        Ok(())
     }
 
     #[test]
-    fn test_file_serialization() {
+    fn test_file_serialization() -> Result<(), Box<dyn Error>> {
         let mut tree: BKTree = BKTree::new(5, 255, 5);
 
-        tree.add(Rc::new("hello".to_string()));
-        tree.add(Rc::new("world".to_string()));
-        tree.add(Rc::new("hella".to_string()));
-        tree.add(Rc::new("hell".to_string()));
-        tree.add(Rc::new("help".to_string()));
+        tree.add(Rc::new("hello".to_string()))?;
+        tree.add(Rc::new("world".to_string()))?;
+        tree.add(Rc::new("hella".to_string()))?;
+        tree.add(Rc::new("hell".to_string()))?;
+        tree.add(Rc::new("help".to_string()))?;
 
-        tree.to_file("bk_tree_test.bin");
+        tree.to_file("bk_tree_test.bin")?;
 
         let file: File = File::open("bk_tree_test.bin").expect("Failed to open BKTree file");
         let new_tree: BKTree = BKTree::from(file);
         
         assert_eq!(tree, new_tree);
         std::fs::remove_file("bk_tree_test.bin").expect("Failed to remove BKTree file");
+        Ok(())
     }
 
     #[test]
     #[ignore = "Computationally expensive since it loads the entire dictionary"]
-    fn test_full_file_serialization() {
+    fn test_full_file_serialization() -> Result<(), Box<dyn Error>> {
         let file: File = File::open("dictionary.txt").expect("Failed to open file");
 
         let dictionary: Dictionary = Dictionary::from((file, 255));
         let tree: BKTree = BKTree::from(&dictionary);
 
-        tree.to_file("bk_tree_full.bin");
+        tree.to_file("bk_tree_full.bin")?;
 
         let file: File = File::open("bk_tree_full.bin").expect("Failed to open BKTree file");
         let new_tree: BKTree = BKTree::from(file);
 
         assert_eq!(tree, new_tree);
-        std::fs::remove_file("bk_tree_full.bin").expect("Failed to remove BKTree file"); 
+        std::fs::remove_file("bk_tree_full.bin").expect("Failed to remove BKTree file");
+        Ok(())
     }
 }
