@@ -1,7 +1,8 @@
+use core::panic;
 use std::{
     error::Error,
     f32::consts::{E, LN_2},
-    fs,
+    fs::{self, File},
     io::{Read, Write},
     path::Path,
 };
@@ -99,12 +100,19 @@ impl BloomFilter {
     }
 }
 
-impl From<Vec<String>> for BloomFilter {
-    fn from(value: Vec<String>) -> Self {
-        let mut bf = Self::new(value.len() as u32, 0.01);
-        for word in value {
-            bf.insert(word.as_str());
-        }
+impl From<File> for BloomFilter {
+    fn from(mut file: File) -> Self {
+        let mut buffer = Vec::<u8>::new();
+        file.read_to_end(&mut buffer).unwrap_or_else(|err| {
+            eprintln!("Error: {}", err);
+            panic!();
+        });
+
+        let bf = BloomFilter::deserialize(&buffer).unwrap_or_else(|err| {
+            eprintln!("Error: {}", err);
+            panic!();
+        });
+
         bf
     }
 }
@@ -177,51 +185,17 @@ mod tests {
         }
 
         bf.to_file("bf.bin").unwrap();
-        let new_bf = BloomFilter::from_file("bf.bin").unwrap();
+        // let new_bf = BloomFilter::from_file("bf.bin").unwrap();
+        let new_bf = BloomFilter::from(File::open(Path::new("bf.bin")).unwrap());
         assert_eq!(bf, new_bf);
         std::fs::remove_file("bf.bin").expect("Failed to remove file");
-    }
-
-    #[test]
-    fn test_from_vector() {
-        let word_present = vec![
-            "A", "quick", "brown", "Fox", "jUmps", "over", "A", "lazy", "DOG",
-        ]
-        .into_iter()
-        .map(String::from)
-        .collect::<Vec<String>>();
-
-        let word_absent = ["hello", "good", "what", "noooo", "truly", "never"];
-
-        let bf = BloomFilter::from(word_present.clone());
-
-        let test = [
-            "good", "Fox", "over", "truly", "brown", "never", "what", "quick",
-        ];
-
-        let (mut true_pos, mut true_neg, mut false_pos) = (0, 0, 0);
-
-        for w in test.into_iter() {
-            if bf.lookup(w) {
-                if word_present.contains(&w.to_string()) {
-                    true_pos += 1;
-                } else if word_absent.contains(&w) {
-                    false_pos += 1;
-                }
-            } else {
-                true_neg += 1;
-            }
-        }
-
-        assert_eq!(true_pos + true_neg + false_pos, test.len());
-        assert!((false_pos as f32 / true_neg as f32) <= 0.01);
     }
 
     #[test]
     fn test_from_dictionary() {
         let file: File = File::open("dictionary.txt").expect("File not found");
         let dictionary: Dictionary = Dictionary::from((file, 255));
-        
+
         let words_absent = ["clesr", "erroe", "hel;", "rivee", "jokeq", "fathep"];
 
         let bf = BloomFilter::from(&dictionary);
