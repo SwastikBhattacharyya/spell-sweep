@@ -1,20 +1,24 @@
-use std::{fs::File, io::{BufReader, BufWriter, Read, Write}};
+use std::{error::Error, fs::File, io::{BufReader, BufWriter, Read, Write}, rc::Rc};
 use rkyv::{AlignedVec, Archive, Deserialize, Serialize};
+
+use crate::dictionary::Dictionary;
 
 #[derive(Clone, Debug, Archive, Serialize, Deserialize, PartialEq)]
 #[archive(compare(PartialEq), check_bytes)]
 #[archive_attr(derive(Debug))]
 #[readonly::make]
 pub struct Node {
-    pub word: String,
+    pub word: NodeString,
     pub next: Vec<Option<u32>>
 }
 
+type NodeString = Option<Rc<String>>;
+
 impl Node {
-    pub fn new(word: String, max_word_length: usize) -> Self {
+    pub fn new(word: NodeString, max_word_length: usize) -> Self {
         Self {
             word,
-            next: vec![None; max_word_length * 2]
+            next: vec![None; max_word_length + 1]
         }
     }
 }
@@ -35,27 +39,12 @@ impl BKTree {
         Self {
             max_word_length,
             alphabet_length,
-            tree: vec![Node::new("".to_string(), max_word_length as usize); max_words],
+            tree: vec![Node::new(None, max_word_length as usize); max_words],
             size: 0
         }
     }
 
-    pub fn from_file(file_path: &str) -> std::io::Result<Self> {
-        let mut file: File = std::fs::File::open(file_path)?;
-        let mut reader: BufReader<&mut File> = BufReader::new(&mut file);        
-        
-        let mut bytes: Vec<u8> = Vec::new();
-        reader.read_to_end(&mut bytes)?;
-
-        let tree_result = rkyv::from_bytes::<BKTree>(&bytes);
-
-        match tree_result {
-            Ok(tree) => Ok(tree),
-            Err(_) => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Failed to deserialize BKTree"))
-        }
-    }
-
-    fn get_damerau_levenshtein_distance(&self, a: &str, b: &str) -> Option<usize> {
+    fn get_damerau_levenshtein_distance(&self, a: &str, b: &str) -> Result<u8, Box<dyn Error>> {
         let m: usize = a.len();
         let n: usize = b.len();
 
@@ -78,10 +67,12 @@ impl BKTree {
         for i in 1..=m {
             let mut db: usize = 0;
             for j in 1..=n {
-                let k: usize = da[b.chars().nth(j - 1)? as usize];
+                let k: usize = da[b.chars().nth(j - 1).ok_or("Couldn't get the (j - 1)th character of b")? as usize];
                 let l: usize = db;
 
-                let cost: usize = if a.chars().nth(i - 1)? == b.chars().nth(j - 1)? { 0 } else { 1 };
+                let a_char: char = a.chars().nth(i - 1).ok_or("Couldn't get the (i - 1)th character of a")?;
+                let b_char: char = b.chars().nth(j - 1).ok_or("Couldn't get the (j - 1)th character of b")?;
+                let cost: usize = if a_char == b_char { 0 } else { 1 };
                 db = if cost == 0 { j } else { db };
 
                 dp[i + 1][j + 1] = std::cmp::min(
@@ -95,204 +86,212 @@ impl BKTree {
                     )
                 );
             }
-            da[a.chars().nth(i - 1)? as usize] = i;
+            da[a.chars().nth(i - 1).ok_or("Couldn't get the (i - 1)th character of a")? as usize] = i;
         }
 
-        Some(dp[m + 1][n + 1])
+        Ok(dp[m + 1][n + 1] as u8)
     }
 
-    pub fn add(&mut self, word: String) {
+    pub fn add(&mut self, word: Rc<String>) -> Result<(), Box<dyn Error>> {
         let mut current: usize = 0;
-        let mut distance: Option<usize>;
+        let mut distance: u8;
 
         loop {
-            distance = self.get_damerau_levenshtein_distance(&self.tree[current].word, &word);
+            let current_word: &str = match &self.tree[current].word {
+                Some(w) => w,
+                None => ""
+            };
+            distance = self.get_damerau_levenshtein_distance(&current_word, &word)?;
 
             match distance {
-                Some(0) => return,
-                Some(d) if self.tree[current].next[d].is_none() => {
-                    if !self.tree[current].word.is_empty() { self.tree[current].next[d] = Some(self.size); }
-                    self.tree[self.size as usize].word = word;
-                    self.size += 1;
-                    return;
-                },
-                Some(d) => {
-                    match self.tree[current].next[d] {
+                0 => break,
+                d => {
+                    match self.tree[current].next[d as usize] {
                         Some(n) => current = n as usize,
-                        None => return
+                        None => {
+                            if !self.tree[current].word.is_none() { self.tree[current].next[d as usize] = Some(self.size); }
+                            self.tree[self.size as usize].word = Some(word);
+                            self.size += 1;
+                            break;
+                        },
                     }
-                }
-                None => return
+                } 
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn does_contain(&self, word: &str) -> Result<bool, Box<dyn Error>> {
+        let mut current: usize = 0;
+        let mut distance: u8;
+
+        loop {
+            let current_word: &str = match &self.tree[current].word {
+                Some(w) => w,
+                None => ""
+            };
+            distance = self.get_damerau_levenshtein_distance(&current_word, &word)?;
+
+            match distance {
+                0 => return Ok(true),
+                d if self.tree[current].next[d as usize].is_none() => return Ok(false),
+                d => {
+                    match self.tree[current].next[d as usize] {
+                        Some(n) => current = n as usize,
+                        None => return Ok(false)
+                    }
+                },
             }
         }
     }
 
-    pub fn does_contain(&self, word: String) -> bool {
-        let mut current: usize = 0;
-        let mut distance: Option<usize>;
-
-        loop {
-            distance = self.get_damerau_levenshtein_distance(&self.tree[current].word, &word);
-
-            match distance {
-                Some(0) => return true,
-                Some(d) if self.tree[current].next[d].is_none() => return false,
-                Some(d) => {
-                    match self.tree[current].next[d] {
-                        Some(n) => current = n as usize,
-                        None => return false
-                    }
-                },
-                None => return false
-            }
-        }
-    }
-
-    pub fn get_similar_words(&self, word: String, tolerance: usize) -> Option<Vec<String>> {
-        let mut result: Vec<String> = Vec::new();
+    pub fn get_similar_words(&self, word: &str, tolerance: u8) -> Result<Vec<&str>, Box<dyn Error>> {
+        let mut result: Vec<&str> = Vec::new();
         let mut stack: Vec<usize> = vec![0];
 
         while !stack.is_empty() {
-            let current: usize = stack.pop()?;
-            let distance: usize = self.get_damerau_levenshtein_distance(&word, &self.tree[current].word)?;
+            let current: usize = stack.pop()
+                .ok_or("Couldn't get current element from stack")?;
+            let current_word: &str = match &self.tree[current].word {
+                Some(w) => w,
+                None => ""
+            };
+            let distance: u8 = self.get_damerau_levenshtein_distance(&word, &current_word)?;
 
             if distance <= tolerance {
-                result.push(self.tree[current].word.clone());
+                result.push(current_word);
             }
 
-            let tolerance_start: usize = if distance > tolerance { distance - tolerance } else { 1 };
-            let tolerance_end: usize = distance + tolerance;
+            let tolerance_start: u8 = if distance > tolerance { distance - tolerance } else { 1 };
+            let tolerance_end: u8 = distance + tolerance;
 
             for i in tolerance_start..=tolerance_end {
-                if self.tree[current].next[i].is_some() {
-                    stack.push(self.tree[current].next[i]? as usize);
+                if self.tree[current].next[i as usize].is_some() {
+                    stack.push(self.tree[current].next[i as usize]
+                            .ok_or("Couldn't push element to stack")? as usize);
                 }
             }
         }
 
-        Some(result)
+        Ok(result)
     }
 
-    pub fn to_file(&self, file_path: &str) -> std::io::Result<()> {
-        let bytes: AlignedVec = match rkyv::to_bytes::<_, 256>(self) {
-            Ok(b) => b,
-            Err(_) => return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Failed to serialize BKTree"))
-        };
-        let file: File = match std::fs::File::create(file_path) {
-            Ok(f) => f,
-            Err(e) => return Err(e)
-        };
+    pub fn to_file(&self, file_path: &str) -> Result<(), Box<dyn Error>> {
+        let bytes: AlignedVec = rkyv::to_bytes::<_, 256>(self)?;
+        let file: File = std::fs::File::create(file_path)?; 
         let mut writer: BufWriter<File> = BufWriter::new(file);
-        match writer.write_all(&bytes) {
-            Ok(_) => (),
-            Err(e) => return Err(e)
-        }
+        writer.write_all(&bytes)?;
 
         Ok(())
     }
 }
 
+impl From<&Dictionary> for BKTree {
+    fn from(value: &Dictionary) -> Self {
+        let mut tree: BKTree = BKTree::new(value.max_word_length, value.alphabet_length, value.words.len());
+    
+        for word in value.words.iter() {
+            tree.add(Rc::clone(&word)).expect("Failed to add word to tree");
+        }
+        
+        tree
+    }
+}
+
+impl From<File> for BKTree {
+    fn from(mut value: File) -> Self {
+        let mut reader: BufReader<&mut File> = BufReader::new(&mut value);        
+        
+        let mut bytes: Vec<u8> = Vec::new();
+        reader.read_to_end(&mut bytes).expect("Failed to read to bytes");
+
+        let tree: BKTree = rkyv::from_bytes::<BKTree>(&bytes).expect("Failed to deserialize BKTree");
+        tree
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::error::Error;
+    use std::fs::File;
+    use std::rc::Rc;
     use super::BKTree;
     use super::super::dictionary::Dictionary;
 
     #[test]
     #[ignore = "Computationally expensive since it loads the entire dictionary"]
     fn test_from_dictionary() {
-        let dictionary: Dictionary = match Dictionary::from_file("dictionary.txt", 255) {
-            Some(d) => d,
-            None => panic!("Failed to load dictionary")
-        };
-        let mut tree: BKTree = BKTree::new(dictionary.max_word_length as u16, dictionary.alphabet_length as u16, dictionary.words.len());
+        let file: File = File::open("dictionary.txt").expect("Failed to open file"); 
 
-        assert_eq!(tree.alphabet_length as usize, dictionary.alphabet_length);
-        assert_eq!(tree.max_word_length as usize, dictionary.max_word_length);
+        let dictionary: Dictionary = Dictionary::from((file, 255));
+        let tree = BKTree::from(&dictionary);
 
-        for word in dictionary.words.iter() {
-            tree.add(word.clone());
-        }
+        assert_eq!(tree.alphabet_length, dictionary.alphabet_length);
+        assert_eq!(tree.max_word_length, dictionary.max_word_length);
+        assert_eq!(tree.size, dictionary.words.len() as u32);
 
         for word in dictionary.words.iter() {
-            assert!(tree.does_contain(word.clone()));
+            assert!(tree.does_contain(&word).unwrap());
+            assert_eq!(Rc::strong_count(&word), 2);
         }
     }
 
     #[test]
-    fn test_similar_words() {
-        let mut tree: BKTree = BKTree::new(3, 255, 5);
+    fn test_similar_words() -> Result<(), Box<dyn Error>> {
+        let mut tree: BKTree = BKTree::new(5, 255, 5);
 
-        tree.add("hello".to_string());
-        tree.add("world".to_string());
-        tree.add("hella".to_string());
-        tree.add("hell".to_string());
-        tree.add("help".to_string());
+        tree.add(Rc::new("hello".to_string()))?;
+        tree.add(Rc::new("world".to_string()))?;
+        tree.add(Rc::new("hella".to_string()))?;
+        tree.add(Rc::new("hell".to_string()))?;
+        tree.add(Rc::new("help".to_string()))?;
 
-        let similar_words: Vec<String> = match tree.get_similar_words("hell".to_string(), 1) {
-            Some(words) => words,
-            None => panic!("Failed to get similar words")
-        };
+        let similar_words: Vec<&str> = tree.get_similar_words("hell", 1).expect("Failed to get similar words");
         assert_eq!(similar_words.len(), 4);
-        assert!(similar_words.contains(&"hello".to_string()));
-        assert!(similar_words.contains(&"hella".to_string()));
-        assert!(similar_words.contains(&"hell".to_string()));
-        assert!(similar_words.contains(&"help".to_string()));
+        assert!(similar_words.contains(&"hello"));
+        assert!(similar_words.contains(&"hella"));
+        assert!(similar_words.contains(&"hell"));
+        assert!(similar_words.contains(&"help"));
+
+        Ok(())
     }
 
     #[test]
-    fn test_file_serialization() {
-        let mut tree: BKTree = BKTree::new(3, 255, 5);
+    fn test_file_serialization() -> Result<(), Box<dyn Error>> {
+        let mut tree: BKTree = BKTree::new(5, 255, 5);
 
-        tree.add("hello".to_string());
-        tree.add("world".to_string());
-        tree.add("hella".to_string());
-        tree.add("hell".to_string());
-        tree.add("help".to_string());
+        tree.add(Rc::new("hello".to_string()))?;
+        tree.add(Rc::new("world".to_string()))?;
+        tree.add(Rc::new("hella".to_string()))?;
+        tree.add(Rc::new("hell".to_string()))?;
+        tree.add(Rc::new("help".to_string()))?;
 
-        match tree.to_file("bk_tree.bin") {
-            Ok(_) => (),
-            Err(e) => panic!("Failed to save BKTree to file: {}", e)
-        };
+        tree.to_file("bk_tree_test.bin")?;
 
-        let new_tree: BKTree = match BKTree::from_file("bk_tree.bin") {
-            Ok(t) => t,
-            Err(e) => panic!("Failed to load BKTree from file: {}", e)
-        };
+        let file: File = File::open("bk_tree_test.bin").expect("Failed to open BKTree file");
+        let new_tree: BKTree = BKTree::from(file);
         
         assert_eq!(tree, new_tree);
-        match std::fs::remove_file("bk_tree.bin") {
-            Ok(_) => (),
-            Err(e) => panic!("Failed to remove BKTree file: {}", e)
-        }
+        std::fs::remove_file("bk_tree_test.bin").expect("Failed to remove BKTree file");
+        Ok(())
     }
 
     #[test]
     #[ignore = "Computationally expensive since it loads the entire dictionary"]
-    fn test_full_file_serialization() {
-        let dictionary: Dictionary = match Dictionary::from_file("dictionary.txt", 255) {
-            Some(d) => d,
-            None => panic!("Failed to load dictionary")
-        };
-        let mut tree: BKTree = BKTree::new(dictionary.max_word_length as u16, dictionary.alphabet_length as u16, dictionary.words.len());
+    fn test_full_file_serialization() -> Result<(), Box<dyn Error>> {
+        let file: File = File::open("dictionary.txt").expect("Failed to open file");
 
-        for word in dictionary.words.iter() {
-            tree.add(word.clone());
-        }
+        let dictionary: Dictionary = Dictionary::from((file, 255));
+        let tree: BKTree = BKTree::from(&dictionary);
 
-        match tree.to_file("bk_tree_full.bin") {
-            Ok(_) => (),
-            Err(e) => panic!("Failed to save BKTree to file: {}", e)
-        };
+        tree.to_file("bk_tree_full.bin")?;
 
-        let new_tree: BKTree = match BKTree::from_file("bk_tree_full.bin") {
-            Ok(t) => t,
-            Err(e) => panic!("Failed to load BKTree from file: {}", e)
-        };
- 
+        let file: File = File::open("bk_tree_full.bin").expect("Failed to open BKTree file");
+        let new_tree: BKTree = BKTree::from(file);
+
         assert_eq!(tree, new_tree);
-        match std::fs::remove_file("bk_tree_full.bin") {
-            Ok(_) => (),
-            Err(e) => panic!("Failed to remove BKTree file: {}", e)
-        };
+        std::fs::remove_file("bk_tree_full.bin").expect("Failed to remove BKTree file");
+        Ok(())
     }
 }

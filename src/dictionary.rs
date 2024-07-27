@@ -1,64 +1,49 @@
-use std::{fs::File, io::{BufRead, BufReader}};
+use std::{fs::File, io::{BufRead, BufReader}, rc::Rc};
 
 #[derive(Debug)]
 #[readonly::make]
 pub struct Dictionary {
-    pub words: Vec<String>,
-    pub max_word_length: usize,
-    pub alphabet_length: usize,
+    pub words: Vec<Rc<String>>,
+    pub max_word_length: u16,
+    pub alphabet_length: u16,
 }
 
-impl Dictionary {
-    pub fn new(max_word_length: usize, alphabet_length: usize) -> Self {
-        Dictionary {
-            words: Vec::new(),
-            max_word_length,
-            alphabet_length,
-        }
-    }
+impl From<(File, u16)> for Dictionary {
+    fn from(value: (File, u16)) -> Self {
+        let buf_reader: BufReader<File> = BufReader::new(value.0);
 
-    pub fn from_file(file_path: &str, alphabet_length: usize) -> Option<Self> {
-        let file: File = File::open(file_path).ok()?;
-        let buf_reader: BufReader<File> = BufReader::new(file);
+        let mut words: Vec<Rc<String>> = Vec::new();
+        let mut max_word_length: u16 = 0;
 
-        let mut words: Vec<String> = Vec::new();
-        let mut max_word_length: usize = 0;
-        
-        for line in buf_reader.lines() {
-            let word: String = line.ok()?;
-            max_word_length = std::cmp::max(word.len(), max_word_length);
-            words.push(word.to_lowercase());
+        for line in buf_reader.lines().filter_map(Result::ok) {
+            let word: Rc<String> = Rc::new(line.to_lowercase());
+            max_word_length = std::cmp::max(word.len() as u16, max_word_length);
+            words.push(word);
         }
 
-        Some(Dictionary {
+        Self {
             words,
             max_word_length,
-            alphabet_length,
-        })
+            alphabet_length: value.1
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::fs::File;
     use super::Dictionary;
-
-    #[test]
-    fn test_new() {
-        let dictionary: Dictionary = Dictionary::new(0, 0);
-        assert_eq!(dictionary.max_word_length, 0);
-        assert_eq!(dictionary.alphabet_length, 0);
-    }
-
+    
     #[test]
     fn test_from_file() {
-        let dictionary: Dictionary = match Dictionary::from_file("dictionary.txt", 255) {
-            Some(dictionary) => dictionary,
-            None => panic!("Failed to load dictionary from file")
-        };
+        let file: File = File::open("dictionary.txt").expect("File not found");
+        let dictionary: Dictionary = Dictionary::from((file, 255));
+
         assert_ne!(dictionary.words.len(), 0);
         assert_eq!(dictionary.alphabet_length, 255);
 
-        let max_word_length: Option<usize> = dictionary.words.iter().map(|word| word.len()).max();
-        max_word_length.map(|max| assert_eq!(max, dictionary.max_word_length));
+        let max_word_length: u16 = dictionary.words.iter().map(|word| word.len()).max().expect("No max word length found") as u16;
+
+        assert_eq!(dictionary.max_word_length, max_word_length);
     }
 }

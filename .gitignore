@@ -1,2 +1,3 @@
 /target
-bf.bin
+bloom_filter.bin
+bk_tree.bin
