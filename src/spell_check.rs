@@ -1,118 +1,74 @@
 use std::{fs::File, path::Path};
-use crate::{bk_tree::BKTree, bloom_filter::BloomFilter, dictionary::Dictionary, processor};
+
+use crate::{bk_tree::BKTree, bloom_filter::BloomFilter, dictionary::Dictionary};
 
 #[readonly::make]
 pub struct SpellCheck {
-    pub dictionary: Option<Dictionary>,
-    pub bk_tree: Option<BKTree>,
-    pub bloom_filter: Option<BloomFilter>
+    bk_tree: BKTree,
+    bloom_filter: BloomFilter,
 }
 
 impl SpellCheck {
-    pub fn new() -> Self {
-       Self { dictionary: None, bk_tree: None, bloom_filter: None } 
-    }
-
-    pub fn populate_bk_tree(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        if Path::new("bk_tree.bin").exists() {
-            let file: File = File::open("bk_tree.bin").expect("Failed to open file");
-            self.bk_tree = Some(BKTree::from(file));
+    pub fn new(bk_tree_path: &str, bloom_filter_path: &str, dictionary_path: &str, alphabet_length: u16) -> Self {
+        let bk_tree: BKTree;
+        let bloom_filter: BloomFilter;
+        let mut dictionary: Option<Dictionary> = None;
+        
+        if Path::new(bk_tree_path).exists() {
+            bk_tree = BKTree::from(File::open(bk_tree_path).expect("Failed to open BKTree file"));
         }
         else {
-            if self.dictionary.is_none() {
-                self.get_dictionary();
+            if dictionary.is_none() {
+                dictionary = Some(Dictionary::from((File::open(dictionary_path).expect("Failed to open dictionary file"), alphabet_length)));
             }
-            match &self.dictionary {
-                Some(dictionary) => {
-                    for word in dictionary.words.iter() {
-                        match &mut self.bk_tree {
-                            Some(tree) => tree.add(word.clone()),
-                            None => return Err(Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, "BKTree not initialized")))
-                        }
-                    }
-                },
-                None => return Err(Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, "Dictionary not initialized")))
-            }
+            bk_tree = BKTree::from(dictionary.as_ref().unwrap());
+            bk_tree.to_file(bk_tree_path).expect("Failed to write BKTree to file");
         }
-        match &self.bk_tree {
-            Some(tree) => {
-                tree.to_file("bk_tree.bin");
-                Ok(())
-            },
-            None => Err(Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, "BKTree not initialized")))
-        }
-    }
 
-    pub fn populate_bloom_filter(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        if Path::new("bloom_filter.bin").exists() {
-            self.bloom_filter = match BloomFilter::from_file("bloom_filter.bin") {
-                Ok(bloom_filter) => Some(bloom_filter),
-                Err(_) => None,
-            };
+        if Path::new(bloom_filter_path).exists() {
+            bloom_filter = BloomFilter::from(File::open(bloom_filter_path).expect("Failed to open BloomFilter file"));
         }
         else {
-            if self.dictionary.is_none() {
-                self.get_dictionary();
+            if dictionary.is_none() {
+                dictionary = Some(Dictionary::from((File::open(dictionary_path).expect("Failed to open dictionary file"), alphabet_length)));
             }
-            self.bloom_filter = match &self.dictionary {
-                Some(dictionary) => {
-                    let words = dictionary.words.clone();
-                    Some(BloomFilter::from(words))
-                },
-                None => None,
-            }
+            bloom_filter = BloomFilter::from(dictionary.as_ref().unwrap());
+            bloom_filter.to_file(bloom_filter_path).expect("Failed to write BloomFilter to file");
         }
 
-        match &self.bloom_filter {
-            Some(bloom_filter) => {
-                match bloom_filter.to_file("bloom_filter.bin") {
-                    Ok(_) => Ok(()),
-                    Err(_) => Err(Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, "Failed to write BloomFilter to file")))
-                }
-            },
-            None => Err(Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, "BloomFilter not initialized"))),
+        Self {
+            bk_tree,
+            bloom_filter,
         }
-    }
-
-    fn get_dictionary(&mut self) {
-        let file: File = match File::open("dictionary.txt") {
-            Ok(file) => file,
-            Err(_) => panic!("Failed to open file")
-        };
-
-        self.dictionary = match Dictionary::from((file, 255)) {
-            dictionary => Some(dictionary),
-        };
     }
 
     pub fn run(&self) {
-        loop {
-            println!("Enter a paragraph to spell check: ");
-            let mut paragraph: String = String::new();
-            std::io::stdin().read_line(&mut paragraph).unwrap();
+        println!("Spell Sweep");
+    }
+}
 
-            let mut words: Vec<String> = processor::get_words(&paragraph);
-            let split_words: Vec<(String, String, String)> = words.iter_mut().map(|word| processor::split_word(word)).collect();
+#[cfg(test)]
+mod tests {
+    use super::SpellCheck;
 
-            for (starting_punctuations, middle_word, ending_punctuations) in split_words {
-                let bloom_filter: &BloomFilter = self.bloom_filter.as_ref().unwrap();
-                let bk_tree: &BKTree = self.bk_tree.as_ref().unwrap();
+    #[test]
+    fn test_new() {
+        let bk_tree_path: &str = "bk_tree_test.bin";
+        let bloom_filter_path: &str = "bloom_filter_test.bin";
+        let dictionary_path: &str = "dictionary.txt";
+        let alphabet_length: u16 = 255;
 
-                let lowercase_word = middle_word.to_lowercase();
-                if bloom_filter.lookup(&lowercase_word) {
-                    let valid_word = bk_tree.does_contain(lowercase_word.clone());
-                    if !valid_word {
-                        println!("{}{}{} is misspelled", &starting_punctuations, &middle_word, &ending_punctuations);
-                        let suggestions = bk_tree.get_similar_words(lowercase_word.clone(), 1);
-                        println!("Suggestions: {:?}", suggestions);
-                    }
-                }
-                else {
-                    println!("{}{}{} is misspelled", &starting_punctuations, &middle_word, &ending_punctuations);
-                    let suggestions = bk_tree.get_similar_words(lowercase_word.clone(), 1);
-                    println!("Suggestions: {:?}", suggestions);
-                }
-            }
+        let spell_check: SpellCheck = SpellCheck::new(bk_tree_path, bloom_filter_path, dictionary_path, alphabet_length);
+
+        assert_ne!(spell_check.bk_tree.tree.len(), 0);
+        assert_eq!(spell_check.bk_tree.alphabet_length, alphabet_length);
+
+        let words_absent = ["clesr", "erroe", "hel;", "rivee", "jokeq", "fathep"];
+        for word in words_absent {
+            assert_eq!(spell_check.bloom_filter.lookup(word), false);
         }
+
+        std::fs::remove_file(bk_tree_path).expect("Failed to remove BKTree file");
+        std::fs::remove_file(bloom_filter_path).expect("Failed to remove BloomFilter file");
     }
 }

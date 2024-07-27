@@ -6,7 +6,6 @@ use std::{
     io::{Read, Write},
     path::Path,
 };
-
 use rkyv::{AlignedVec, Archive, Deserialize, Serialize};
 
 use crate::{dictionary::Dictionary, utils};

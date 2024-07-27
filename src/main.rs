@@ -2,15 +2,17 @@ mod bloom_filter;
 mod bk_tree;
 mod dictionary;
 mod processor;
-// mod spell_check;
+mod spell_check;
 mod utils;
 
-// use spell_check::SpellCheck;
+use spell_check::SpellCheck;
 
 fn main() {
-    // let mut spell_check: SpellCheck = SpellCheck::new();
-    // let _ = spell_check.populate_bk_tree();
-    // let _ = spell_check.populate_bloom_filter();
+    let bk_tree_path: &str = "bk_tree.bin";
+    let bloom_filter_path: &str = "bloom_filter.bin";
+    let dictionary_path: &str = "dictionary.txt";
+    let alphabet_length: u16 = 255;
 
-    // spell_check.run();
+    let spell_check: SpellCheck = SpellCheck::new(bk_tree_path, bloom_filter_path, dictionary_path, alphabet_length);
+    spell_check.run();
 }
