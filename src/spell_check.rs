@@ -1,6 +1,10 @@
-use std::{fs::File, path::Path};
+use std::{
+    fs::{File, OpenOptions},
+    io::{self, BufRead, BufReader, Write},
+    path::Path,
+};
 
-use crate::{bk_tree::BKTree, bloom_filter::BloomFilter, dictionary::Dictionary};
+use crate::{bk_tree::BKTree, bloom_filter::BloomFilter, dictionary::Dictionary, processor};
 
 #[readonly::make]
 pub struct SpellCheck {
@@ -9,31 +13,46 @@ pub struct SpellCheck {
 }
 
 impl SpellCheck {
-    pub fn new(bk_tree_path: &str, bloom_filter_path: &str, dictionary_path: &str, alphabet_length: u16) -> Self {
+    pub fn new(
+        bk_tree_path: &str,
+        bloom_filter_path: &str,
+        dictionary_path: &str,
+        alphabet_length: u16,
+    ) -> Self {
         let bk_tree: BKTree;
         let bloom_filter: BloomFilter;
         let mut dictionary: Option<Dictionary> = None;
-        
+
         if Path::new(bk_tree_path).exists() {
             bk_tree = BKTree::from(File::open(bk_tree_path).expect("Failed to open BKTree file"));
-        }
-        else {
+        } else {
             if dictionary.is_none() {
-                dictionary = Some(Dictionary::from((File::open(dictionary_path).expect("Failed to open dictionary file"), alphabet_length)));
+                dictionary = Some(Dictionary::from((
+                    File::open(dictionary_path).expect("Failed to open dictionary file"),
+                    alphabet_length,
+                )));
             }
             bk_tree = BKTree::from(dictionary.as_ref().unwrap());
-            bk_tree.to_file(bk_tree_path).expect("Failed to write BKTree to file");
+            bk_tree
+                .to_file(bk_tree_path)
+                .expect("Failed to write BKTree to file");
         }
 
         if Path::new(bloom_filter_path).exists() {
-            bloom_filter = BloomFilter::from(File::open(bloom_filter_path).expect("Failed to open BloomFilter file"));
-        }
-        else {
+            bloom_filter = BloomFilter::from(
+                File::open(bloom_filter_path).expect("Failed to open BloomFilter file"),
+            );
+        } else {
             if dictionary.is_none() {
-                dictionary = Some(Dictionary::from((File::open(dictionary_path).expect("Failed to open dictionary file"), alphabet_length)));
+                dictionary = Some(Dictionary::from((
+                    File::open(dictionary_path).expect("Failed to open dictionary file"),
+                    alphabet_length,
+                )));
             }
             bloom_filter = BloomFilter::from(dictionary.as_ref().unwrap());
-            bloom_filter.to_file(bloom_filter_path).expect("Failed to write BloomFilter to file");
+            bloom_filter
+                .to_file(bloom_filter_path)
+                .expect("Failed to write BloomFilter to file");
         }
 
         Self {
@@ -42,9 +61,85 @@ impl SpellCheck {
         }
     }
 
-    pub fn run(&self) {
-        println!("Spell Sweep");
+    fn handle_suggestions(word: &str, suggestions: Vec<&str>) -> String {
+        println!("{} is incorrect.", word);
+        for (idx, suggestion) in suggestions.iter().enumerate() {
+            println!("Suggestion: {} -> {}", idx + 1, suggestion);
+        }
+
+        let idx = take_input();
+
+        return suggestions[(idx - 1) as usize].to_string();
     }
+
+    fn insert_suggestion(
+        bk_tree: &BKTree,
+        word: &str,
+        joinable_vec: &mut Vec<(String, String, String)>,
+        data: (String, String),
+    ) {
+        let mut tol_value = 1;
+        let mut suggestions;
+        loop {
+            suggestions = bk_tree.get_similar_words(&word, tol_value).unwrap();
+            if suggestions.len() > 0 {
+                break;
+            }
+            tol_value += 1;
+        }
+        joinable_vec.push((
+            data.0,
+            SpellCheck::handle_suggestions(&word, suggestions),
+            data.1,
+        ));
+    }
+
+    pub fn run(&self, cmd_data: String) {
+        let mut joinable_vec = Vec::<(String, String, String)>::new();
+
+        for (start_punc, word, end_punc) in processor::split_input(&cmd_data) {
+            let word = word.to_lowercase();
+            if !self.bloom_filter.lookup(&word) {
+                SpellCheck::insert_suggestion(
+                    &self.bk_tree,
+                    &word,
+                    &mut joinable_vec,
+                    (start_punc, end_punc),
+                );
+            } else {
+                if self.bk_tree.does_contain(&word).unwrap() {
+                    joinable_vec.push((start_punc, word, end_punc));
+                } else {
+                    SpellCheck::insert_suggestion(
+                        &self.bk_tree,
+                        &word,
+                        &mut joinable_vec,
+                        (start_punc, end_punc),
+                    );
+                }
+            }
+        }
+
+        println!("{}", processor::join_input(joinable_vec));
+    }
+}
+
+fn take_input() -> u32 {
+    print!("Enter the suggestion number: ");
+    io::stdout().flush().unwrap();
+
+    let fd = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+        .unwrap();
+
+    let mut reader = BufReader::new(fd);
+
+    let mut input = String::new();
+    reader.read_line(&mut input).unwrap();
+
+    input.trim().parse::<u32>().unwrap()
 }
 
 #[cfg(test)]
@@ -58,7 +153,12 @@ mod tests {
         let dictionary_path: &str = "dictionary.txt";
         let alphabet_length: u16 = 255;
 
-        let spell_check: SpellCheck = SpellCheck::new(bk_tree_path, bloom_filter_path, dictionary_path, alphabet_length);
+        let spell_check: SpellCheck = SpellCheck::new(
+            bk_tree_path,
+            bloom_filter_path,
+            dictionary_path,
+            alphabet_length,
+        );
 
         assert_ne!(spell_check.bk_tree.tree.len(), 0);
         assert_eq!(spell_check.bk_tree.alphabet_length, alphabet_length);

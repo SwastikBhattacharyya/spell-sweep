@@ -1,7 +1,7 @@
 use std::{
     error::Error,
     fs,
-    io::{self, Read},
+    io::{self, BufRead, BufReader, Read},
     path::PathBuf,
     process,
 };
@@ -18,16 +18,14 @@ enum Data {
 fn read_stdin() -> Result<Option<String>> {
     if !atty::is(atty::Stream::Stdin) {
         let stdin = io::stdin();
-        let mut reader = stdin.lock();
+        let mut reader = BufReader::new(stdin);
 
-        let mut buffer = Vec::<u8>::new();
-        reader.read_to_end(&mut buffer)?;
+        let mut buffer = String::new();
+        reader
+            .read_line(&mut buffer)
+            .expect("whatever I don't care");
 
-        return Ok(Some(
-            String::from_utf8_lossy(buffer.as_slice())
-                .trim()
-                .to_string(),
-        ));
+        return Ok(Some(buffer.trim().to_string()));
     }
 
     Ok(None)
@@ -62,7 +60,7 @@ fn handle_piped_data(piped_data: Option<String>) -> String {
     }
 }
 
-pub fn parse_cmd_args() -> Result<()> {
+pub fn parse_cmd_args() -> Result<String> {
     let matches = command!()
         .arg(
             Arg::new("filepath")
@@ -78,9 +76,7 @@ pub fn parse_cmd_args() -> Result<()> {
         None => handle_input_data(Data::Pipe(read_stdin()?))?,
     };
 
-    println!("{}", data);
-
-    Ok(())
+    Ok(data)
 }
 
 #[cfg(test)]
