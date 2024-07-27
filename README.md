@@ -6,6 +6,11 @@ Spell Sweep is a spell checker for the English dictionary. It takes input from a
 
 Spell sweep is a simple spell checker that uses a dictionary file to generate a Bloom Filter and a BK Tree using Damerau-Levenshtein distance to suggest corrections for misspelled words. The dictionary is created using a text file obtained from [dwyl's repository](https://github.com/dwyl/english-words). Each word is processed into three parts, punctuations at the beginning, the word itself, and punctuations at the end. The punctuations are used to reconstruct the word after the correction is made. Each word is passed into the Bloom Filter to check if it is a valid word. If the Bloom filter returns that the word is not present, the BK Tree is used to suggest corrections. If the Bloom suggests that the word may be present, the BK Tree is used to confirm the presence of the word. If the word is not present in the dictionary, the user is asked for a correction.
 
+
+## Screenshot
+
+![Spell Sweep](screenshot.jpeg)
+
 ## Usage
 
 Spell Sweep can be used in two ways:
