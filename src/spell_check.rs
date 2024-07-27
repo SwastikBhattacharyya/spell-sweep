@@ -75,13 +75,14 @@ impl SpellCheck {
     fn insert_suggestion(
         bk_tree: &BKTree,
         word: &str,
+        lower_word: &str,
         joinable_vec: &mut Vec<(String, String, String)>,
         data: (String, String),
     ) {
         let mut tol_value = 1;
         let mut suggestions;
         loop {
-            suggestions = bk_tree.get_similar_words(&word, tol_value).unwrap();
+            suggestions = bk_tree.get_similar_words(&lower_word, tol_value).unwrap();
             if suggestions.len() > 0 {
                 break;
             }
@@ -89,7 +90,10 @@ impl SpellCheck {
         }
         joinable_vec.push((
             data.0,
-            SpellCheck::handle_suggestions(&word, suggestions),
+            convert_case(
+                SpellCheck::handle_suggestions(&lower_word, suggestions).as_str(),
+                &word,
+            ),
             data.1,
         ));
     }
@@ -98,21 +102,23 @@ impl SpellCheck {
         let mut joinable_vec = Vec::<(String, String, String)>::new();
 
         for (start_punc, word, end_punc) in processor::split_input(&cmd_data) {
-            let word = word.to_lowercase();
-            if !self.bloom_filter.lookup(&word) {
+            let lower_word = word.to_lowercase();
+            if !self.bloom_filter.lookup(&lower_word) {
                 SpellCheck::insert_suggestion(
                     &self.bk_tree,
                     &word,
+                    &lower_word,
                     &mut joinable_vec,
                     (start_punc, end_punc),
                 );
             } else {
-                if self.bk_tree.does_contain(&word).unwrap() {
-                    joinable_vec.push((start_punc, word, end_punc));
+                if self.bk_tree.does_contain(&lower_word).unwrap() {
+                    joinable_vec.push((start_punc, convert_case(&lower_word, &word), end_punc));
                 } else {
                     SpellCheck::insert_suggestion(
                         &self.bk_tree,
                         &word,
+                        &lower_word,
                         &mut joinable_vec,
                         (start_punc, end_punc),
                     );
@@ -122,6 +128,24 @@ impl SpellCheck {
 
         println!("{}", processor::join_input(joinable_vec));
     }
+}
+
+fn convert_case(sugg: &str, orig: &str) -> String {
+    let mut result = String::new();
+
+    for i in 0..sugg.len() {
+        if orig.chars().nth(i).is_none() {
+            result.push(sugg.chars().nth(i).unwrap());
+        } else if !sugg.chars().nth(i).unwrap().is_alphanumeric() {
+            result.push(sugg.chars().nth(i).unwrap());
+        } else if orig.chars().nth(i).unwrap().is_lowercase() {
+            result.push(sugg.chars().nth(i).unwrap().to_lowercase().next().unwrap());
+        } else if orig.chars().nth(i).unwrap().is_uppercase() {
+            result.push(sugg.chars().nth(i).unwrap().to_uppercase().next().unwrap());
+        }
+    }
+
+    result
 }
 
 fn take_input() -> u32 {
