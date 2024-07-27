@@ -4,5 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+atty = "0.2.14"
+clap = { version = "4.5.11", features = ["cargo"] }
 readonly = "0.2.12"
 rkyv = { version = "0.7.44", features = ["validation"] }
